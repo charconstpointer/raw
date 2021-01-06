@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 )
 
@@ -19,7 +18,7 @@ func NewClient(addr string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	id := uint32(rand.Intn(9999))
+	id := uint32(4444)
 	log.Println("id", id)
 	return &Client{
 		conn: c,
@@ -28,8 +27,8 @@ func NewClient(addr string) (*Client, error) {
 }
 
 func (c *Client) Send(payload []byte) error {
-	h := header(make([]byte, HeaderSize))
-	h.encode(uint32(len(payload)), uint16(c.ID))
+	h := Header(make([]byte, HeaderSize))
+	h.Encode(uint32(len(payload)), uint32(c.ID))
 
 	sent := 0
 	for sent < len(h) {
