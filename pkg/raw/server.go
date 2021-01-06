@@ -2,6 +2,7 @@ package raw
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,11 +10,18 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type Server struct {
-	conn    net.Listener
-	streams map[uint32]*Stream
+	downstream net.Conn
+	streams    map[uint32]*Stream
+	sendCh     chan Msg
+}
+type Msg struct {
+	H       Header
+	Payload io.Reader
 }
 
 func NewServer() *Server {
@@ -21,23 +29,54 @@ func NewServer() *Server {
 		streams: make(map[uint32]*Stream),
 	}
 }
+
 func (s *Server) Listen(addr string) error {
-	listener, err := net.Listen("tcp", addr)
+	conn, err := net.Listen("tcp", addr)
 	if err != nil {
-		return err
+		log.Fatal(err.Error())
 	}
 
-	s.conn = listener
-	conn, err := s.conn.Accept()
-	log.Println("new client connected")
+	downstream, err := conn.Accept()
 	if err != nil {
-		return err
+		log.Fatal(err.Error())
 	}
+
+	log.Println("downstream connected🥳")
+
+	s.downstream = downstream
+
+	ctx, _ := context.WithCancel(context.Background())
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(s.send)
+	g.Go(s.recv)
+	return g.Wait()
+
+}
+func (s *Server) send() error {
+	for {
+		select {
+		case msg := <-s.sendCh:
+			sent := 0
+			for sent < len(msg.H) {
+				s.downstream.Write(msg.H)
+			}
+
+			n, err := io.Copy(s.downstream, msg.Payload)
+			if err != nil {
+				log.Fatalf("could not propagate msg downstream, %s", err.Error())
+			}
+
+			log.Printf("wrote %d bytes downstream", n)
+		}
+	}
+}
+
+func (s *Server) recv() error {
 	hb := Header(make([]byte, HeaderSize))
-
 	for {
 		//read header
-		n, err := io.ReadFull(conn, hb)
+		n, err := io.ReadFull(s.downstream, hb)
 
 		if n > 0 {
 			fmt.Println("request from", hb.ID())
@@ -50,8 +89,7 @@ func (s *Server) Listen(addr string) error {
 			//read body
 			mb := make([]byte, int(hb.Next()))
 			log.Println(len(mb))
-			_, err = io.ReadFull(conn, mb)
-			fmt.Printf("body %s\n", mb)
+			_, err = io.ReadFull(s.downstream, mb)
 
 			upstream, exists := s.streams[hb.ID()]
 			if !exists {
@@ -63,18 +101,15 @@ func (s *Server) Listen(addr string) error {
 			}
 		}
 	}
-
 }
-
 func (s *Server) ListenUp(addr string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 
-	s.conn = listener
 	for {
-		conn, err := s.conn.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -87,8 +122,26 @@ func (s *Server) ListenUp(addr string) error {
 		id := ID(conn)
 		log.Println("added new upstream", id)
 		s.streams[4444] = stream
+		go s.handleUpstream(stream)
 	}
 
+}
+
+func (s *Server) handleUpstream(stream *Stream) {
+	b := make([]byte, 1024)
+	for {
+		n, _ := stream.conn.Read(b)
+		if n > 0 {
+			log.Printf("received message from upstream of len %d", n)
+			h := Header{}
+			h.Encode(uint32(n), ID(stream.conn))
+			payload := bytes.NewBuffer(b[:n])
+			s.sendCh <- Msg{
+				H:       h,
+				Payload: payload,
+			}
+		}
+	}
 }
 
 func ID(conn net.Conn) uint32 {

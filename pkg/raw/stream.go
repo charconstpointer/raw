@@ -1,12 +1,14 @@
 package raw
 
-import "io"
+import (
+	"net"
+)
 
 type Stream struct {
-	conn io.ReadWriteCloser
+	conn net.Conn
 }
 
-func NewStream(conn io.ReadWriteCloser) (*Stream, error) {
+func NewStream(conn net.Conn) (*Stream, error) {
 	s := &Stream{
 		conn: conn,
 	}
