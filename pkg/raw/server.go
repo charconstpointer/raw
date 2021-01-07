@@ -3,7 +3,9 @@ package raw
 import (
 	"bytes"
 	"io"
-	"log"
+
+	log "github.com/sirupsen/logrus"
+
 	"net"
 
 	"github.com/pkg/errors"
@@ -20,7 +22,7 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot start downstream listener")
 	}
-	log.Printf("✔waiting for downstream to connect on %s", downaddr)
+	log.Infof("✔waiting for downstream to connect on %s", downaddr)
 	downstream, err := l.Accept()
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot accept downstream connection")
@@ -30,12 +32,12 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot start accepting upstream connections")
 	}
-	log.Printf("✔read to accept upstream connections on %s", upaddr)
+	log.Infof("✔read to accept upstream connections on %s", upaddr)
 	conn, err := s.Accept()
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot accept upstream connection")
 	}
-	log.Printf("🙋‍♀️%s connected", conn.RemoteAddr().String())
+	log.Infof("🙋‍♀️%s connected", conn.RemoteAddr().String())
 	server := &Server{
 		downstream: downstream,
 		upstream:   conn,

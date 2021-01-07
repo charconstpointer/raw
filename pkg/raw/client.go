@@ -3,7 +3,9 @@ package raw
 import (
 	"bytes"
 	"io"
-	"log"
+
+	log "github.com/sirupsen/logrus"
+
 	"net"
 
 	"github.com/pkg/errors"
@@ -20,13 +22,13 @@ func NewClient(upaddr string, downaddr string) (*Client, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "could not connect to downstream")
 	}
-	log.Printf("🎠connected to downstream at %s", downaddr)
+	log.Infof("🎠connected to downstream at %s", downaddr)
 
 	upstream, err := net.Dial("tcp", upaddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not connect to upstream")
 	}
-	log.Printf("🧵connected to upstream at %s", upaddr)
+	log.Infof("🧵connected to upstream at %s", upaddr)
 	id := uint32(4444)
 	c := &Client{
 		downstream: downstream,
