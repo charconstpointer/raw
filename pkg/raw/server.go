@@ -2,160 +2,79 @@ package raw
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
-	"strconv"
-	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type Server struct {
+	upstreams  map[uint32]net.Conn
+	upstream   net.Conn
 	downstream net.Conn
-	streams    map[uint32]*Stream
-	sendCh     chan Msg
-}
-type Msg struct {
-	H       Header
-	Payload io.Reader
 }
 
-func NewServer() *Server {
-	s := &Server{
-		streams: make(map[uint32]*Stream),
-		sendCh:  make(chan Msg),
-	}
-
-	return s
-}
-
-func (s *Server) Listen(addr string) error {
-	conn, err := net.Listen("tcp", addr)
+func NewServer(upaddr string, downaddr string) (*Server, error) {
+	l, err := net.Listen("tcp", downaddr)
 	if err != nil {
-		log.Fatal(err.Error())
+		return nil, errors.Wrap(err, "cannot start downstream listener")
 	}
-
-	downstream, err := conn.Accept()
+	log.Printf("✔waiting for downstream to connect on %s", downaddr)
+	downstream, err := l.Accept()
 	if err != nil {
-		log.Fatal(err.Error())
+		return nil, errors.Wrap(err, "cannot accept downstream connection")
 	}
 
-	log.Println("downstream connected🥳")
+	s, err := net.Listen("tcp", upaddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot start accepting upstream connections")
+	}
+	log.Printf("✔read to accept upstream connections on %s", upaddr)
+	conn, err := s.Accept()
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot accept upstream connection")
+	}
+	log.Printf("🙋‍♀️%s connected", conn.RemoteAddr().String())
+	server := &Server{
+		downstream: downstream,
+		upstream:   conn,
+	}
+	return server, nil
+}
 
-	s.downstream = downstream
-
-	go s.send()
+func (s *Server) Run() {
 	go s.recv()
-	return nil
-}
-func (s *Server) send() error {
-	for {
-		select {
-		case msg := <-s.sendCh:
-			sent := 0
-			for sent < len(msg.H) {
-				n, err := s.downstream.Write(msg.H[sent:])
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-				sent += n
-			}
-			// Send data from a body if given
-			if msg.Payload != nil {
-				_, err := io.Copy(s.downstream, msg.Payload)
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-			}
-
-		}
-	}
+	s.send()
 }
 
-func (s *Server) recv() error {
-	hb := Header(make([]byte, HeaderSize))
+func (s *Server) recv() {
+	h := Header(make([]byte, HeaderSize))
 	for {
-		//read header
-		n, err := io.ReadFull(s.downstream, hb)
+		io.ReadFull(s.downstream, h)
+		mb := make([]byte, int(h.Next()))
+		n, _ := io.ReadFull(s.downstream, mb)
 
 		if n > 0 {
-			if err != nil {
-				fmt.Println("failed to read header")
-				return err
-			}
 
-			//read body
-			mb := make([]byte, int(hb.Next()))
-			n, err = io.ReadFull(s.downstream, mb)
-			log.Printf("expected to read %d, got %d", hb.Next(), n)
-			upstream, exists := s.streams[4]
-			if !exists {
-				log.Fatal("upstream does not exists", hb.ID())
-			}
-
-			n, err := io.Copy(upstream.conn, bytes.NewReader(mb))
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-
-			log.Printf("sent %d bytes to client, expected to send %d \r\n", n, hb.Next())
-			if err != nil {
-				log.Fatal(err.Error())
-			}
+			io.Copy(s.upstream, bytes.NewBuffer(mb))
 		}
 	}
 }
-func (s *Server) ListenUp(addr string) error {
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
 
+func (s *Server) send() {
+	b := make([]byte, 1096)
+	h := Header(make([]byte, HeaderSize))
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Fatal(err.Error())
+		n, _ := s.upstream.Read(b)
+		h.Encode(uint32(n), 1)
+		sent := 0
+		for sent < HeaderSize {
+			n, _ := s.downstream.Write(h)
+			sent += n
 		}
-		log.Println("new client connected")
-
-		stream, err := NewStream(conn)
-		if err != nil {
-			return errors.New("cannot create new stream")
-		}
-		id := ID(conn)
-		log.Println("added new upstream", id)
-		s.streams[4] = stream
-		go s.handleUpstream(stream)
-	}
-
-}
-
-func (s *Server) handleUpstream(stream *Stream) {
-	b := make([]byte, 32*1024)
-	for {
-		n, _ := stream.conn.Read(b)
 		if n > 0 {
-			log.Printf("received message from upstream of len %d", n)
-			h := Header(make([]byte, HeaderSize))
-			h.Encode(uint32(n), ID(stream.conn))
-			payload := bytes.NewBuffer(b[:n])
-			log.Printf("payload len %d", h.Next())
-			s.sendCh <- Msg{
-				H:       h,
-				Payload: payload,
-			}
+			io.Copy(s.downstream, bytes.NewBuffer(b[:n]))
 		}
 	}
-}
-
-func ID(conn net.Conn) uint32 {
-	index := strings.LastIndex(conn.RemoteAddr().String(), ":") + 1
-	port := conn.RemoteAddr().String()[index:]
-
-	parsed, err := strconv.Atoi(port)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-	return uint32(parsed)
 }

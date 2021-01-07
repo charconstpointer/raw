@@ -2,47 +2,73 @@ package raw
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"net"
+
+	"github.com/pkg/errors"
 )
 
 type Client struct {
-	conn net.Conn
-	ID   uint32
+	downstream net.Conn
+	upstream   net.Conn
+	ID         uint32
 }
 
-func NewClient(addr string) (*Client, error) {
-	c, err := net.Dial("tcp", addr)
+func NewClient(upaddr string, downaddr string) (*Client, error) {
+	downstream, err := net.Dial("tcp", downaddr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "could not connect to downstream")
 	}
+	log.Printf("🎠connected to downstream at %s", downaddr)
+
+	upstream, err := net.Dial("tcp", upaddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not connect to upstream")
+	}
+	log.Printf("🧵connected to upstream at %s", upaddr)
 	id := uint32(4444)
-	log.Println("id", id)
-	return &Client{
-		conn: c,
-		ID:   id,
-	}, nil
+	c := &Client{
+		downstream: downstream,
+		upstream:   upstream,
+		ID:         id,
+	}
+
+	return c, nil
+}
+func (c *Client) Run() {
+	go c.recv()
+	c.send()
 }
 
-func (c *Client) Send(payload []byte) error {
+func (c *Client) recv() {
 	h := Header(make([]byte, HeaderSize))
-	h.Encode(uint32(len(payload)), uint32(c.ID))
+	b := make([]byte, 1096)
+	for {
+		n, _ := c.downstream.Read(b)
+		h.Encode(uint32(n), 1)
+		sent := 0
+		for sent < HeaderSize {
+			n, _ := c.upstream.Write(h)
+			sent += n
+		}
+		if n > 0 {
+			io.Copy(c.upstream, bytes.NewBuffer(b[:n]))
+		}
+	}
+}
 
-	sent := 0
-	for sent < len(h) {
-		n, err := c.conn.Write(h)
-		if err != nil {
-			log.Fatal(err.Error())
+func (c *Client) send() {
+	h := Header(make([]byte, HeaderSize))
+	for {
+		io.ReadFull(c.upstream, h)
+		if h != nil {
+			mb := make([]byte, int(h.Next()))
+			n, _ := io.ReadFull(c.upstream, mb)
+			if n > 0 {
+				io.Copy(c.downstream, bytes.NewBuffer(mb))
+			}
 		}
 
-		sent += n
 	}
-
-	n, err := io.Copy(c.conn, bytes.NewReader(payload))
-	if n != int64(len(payload)) {
-		return fmt.Errorf("something went wrong could not send full payload")
-	}
-	return err
 }
