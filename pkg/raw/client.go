@@ -67,6 +67,7 @@ func (c *Client) send() {
 		if h != nil {
 			mb := make([]byte, int(h.Next()))
 			n, _ := io.ReadFull(c.upstream, mb)
+			log.Printf("from upstream, expecting %d, got %d", h.Next(), n)
 			if n > 0 {
 				io.Copy(c.downstream, bytes.NewBuffer(mb))
 			}

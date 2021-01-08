@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	figure.NewColorFigure("passt", "slant", "pink", true).Print()
+	figure.NewColorFigure("passt", "slant", "cyan", true).Print()
 
 	s, err := raw.NewServer(":6444", ":7000")
 	if err != nil {

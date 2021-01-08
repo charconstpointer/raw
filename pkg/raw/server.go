@@ -12,9 +12,9 @@ import (
 )
 
 type Server struct {
-	upstreams  map[uint32]net.Conn
-	upstream   net.Conn
+	upstreams  map[uint32]*Stream
 	downstream net.Conn
+	sendCh     chan Message
 }
 
 func NewServer(upaddr string, downaddr string) (*Server, error) {
@@ -33,20 +33,29 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 		return nil, errors.Wrap(err, "cannot start accepting upstream connections")
 	}
 	log.Infof("✔read to accept upstream connections on %s", upaddr)
-	conn, err := s.Accept()
-	if err != nil {
-		return nil, errors.Wrap(err, "cannot accept upstream connection")
-	}
-	log.Infof("🙋‍♀️%s connected", conn.RemoteAddr().String())
 	server := &Server{
 		downstream: downstream,
-		upstream:   conn,
+		upstreams:  make(map[uint32]*Stream),
+		sendCh:     make(chan Message),
 	}
-	return server, nil
+	go func(s net.Listener, server *Server) {
+		conn, _ := s.Accept()
+		upstream, err := NewStream(conn, server.sendCh)
+		if err != nil {
+			log.Error(err.Error())
+		}
+
+		server.upstreams[upstream.ID] = upstream
+		log.Infof("🙋‍♀️%s connected", conn.RemoteAddr().String())
+
+	}(s, server)
+
+	return server, err
 }
 
 func (s *Server) Run() {
 	go s.recv()
+	// go s.listenUp()
 	s.send()
 }
 
@@ -56,27 +65,45 @@ func (s *Server) recv() {
 		io.ReadFull(s.downstream, h)
 		mb := make([]byte, int(h.Next()))
 		n, _ := io.ReadFull(s.downstream, mb)
-
+		upstream := s.upstreams[h.ID()]
 		if n > 0 {
 
-			io.Copy(s.upstream, bytes.NewBuffer(mb))
+			// io.Copy(s.upstream, bytes.NewBuffer(mb))
+			io.Copy(upstream.conn, bytes.NewBuffer(mb))
 		}
 	}
 }
 
 func (s *Server) send() {
-	b := make([]byte, 1096)
-	h := Header(make([]byte, HeaderSize))
 	for {
-		n, _ := s.upstream.Read(b)
-		h.Encode(uint32(n), 1)
-		sent := 0
-		for sent < HeaderSize {
-			n, _ := s.downstream.Write(h)
-			sent += n
-		}
-		if n > 0 {
-			io.Copy(s.downstream, bytes.NewBuffer(b[:n]))
+		select {
+		case msg := <-s.sendCh:
+			if msg.Header.Next() == 0 {
+				continue
+			}
+			sent := 0
+			for sent < HeaderSize {
+				n, _ := s.downstream.Write(msg.Header)
+				sent += n
+			}
+			// if n > 0 {
+			n, _ := io.Copy(s.downstream, bytes.NewBuffer(msg.Payload))
+			log.Println(msg.Header.Next(), n)
+			// }
 		}
 	}
+	// b := make([]byte, 1096)
+	// h := Header(make([]byte, HeaderSize))
+	// for {
+	// 	n, _ := s.upstream.Read(b)
+	// 	h.Encode(uint32(n), 1)
+	// 	sent := 0
+	// 	for sent < HeaderSize {
+	// 		n, _ := s.downstream.Write(h)
+	// 		sent += n
+	// 	}
+	// 	if n > 0 {
+	// 		io.Copy(s.downstream, bytes.NewBuffer(b[:n]))
+	// 	}
+	// }
 }
