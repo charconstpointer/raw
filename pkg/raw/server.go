@@ -13,6 +13,7 @@ import (
 
 type Server struct {
 	upstreams  map[uint32]*Stream
+	upaddr     string
 	downstream net.Conn
 	sendCh     chan Message
 }
@@ -28,36 +29,39 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 		return nil, errors.Wrap(err, "cannot accept downstream connection")
 	}
 
-	s, err := net.Listen("tcp", upaddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "cannot start accepting upstream connections")
-	}
-	log.Infof("✔read to accept upstream connections on %s", upaddr)
 	server := &Server{
 		downstream: downstream,
+		upaddr:     upaddr,
 		upstreams:  make(map[uint32]*Stream),
 		sendCh:     make(chan Message),
 	}
-	go func(s net.Listener, server *Server) {
-		for {
-			conn, _ := s.Accept()
-			upstream, err := NewStream(conn, server.sendCh)
-			if err != nil {
-				log.Error(err.Error())
-			}
-
-			server.upstreams[upstream.ID] = upstream
-			log.Infof("🙋‍♀️%s connected", upstream.ID)
-		}
-
-	}(s, server)
 
 	return server, err
 }
 
 func (s *Server) Run() {
+	go s.accept()
 	go s.recv()
 	s.send()
+}
+
+func (s *Server) accept() {
+	l, err := net.Listen("tcp", s.upaddr)
+	if err != nil {
+		log.Error(err, "cannot start accepting upstream connections")
+	}
+	log.Infof("✔read to accept upstream connections on %s", s.upaddr)
+	for {
+		conn, _ := l.Accept()
+		upstream, err := NewStream(conn, s.sendCh)
+		if err != nil {
+			log.Error(err.Error())
+		}
+
+		s.upstreams[upstream.ID] = upstream
+		log.Infof("🙋‍♀️%s connected", upstream.ID)
+	}
+
 }
 
 func (s *Server) recv() {
