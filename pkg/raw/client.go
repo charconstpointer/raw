@@ -15,6 +15,7 @@ type Client struct {
 	downstreams map[int32]*Downstream
 	downstream  net.Conn
 	upstream    net.Conn
+	sendCh      chan Message
 	ID          uint32
 }
 
@@ -35,6 +36,7 @@ func NewClient(upaddr string, downaddr string) (*Client, error) {
 		downstreams: make(map[int32]*Downstream),
 		// downstream:  downstream,
 		upstream: upstream,
+		sendCh:   make(chan Message),
 		ID:       id,
 	}
 
@@ -46,20 +48,33 @@ func (c *Client) Run() {
 }
 
 func (c *Client) recv() {
-	h := Header(make([]byte, HeaderSize))
-	b := make([]byte, 1096)
 	for {
-		n, _ := c.downstream.Read(b)
-		h.Encode(uint32(n), 1)
-		sent := 0
-		for sent < HeaderSize {
-			n, _ := c.upstream.Write(h)
-			sent += n
-		}
-		if n > 0 {
-			io.Copy(c.upstream, bytes.NewBuffer(b[:n]))
+		select {
+		case msg := <-c.sendCh:
+			sent := 0
+			for sent < HeaderSize {
+				n, _ := c.upstream.Write(msg.Header)
+				sent += n
+			}
+
+			io.Copy(c.upstream, bytes.NewBuffer(msg.Payload))
+
 		}
 	}
+	// h := Header(make([]byte, HeaderSize))
+	// b := make([]byte, 1096)
+	// for {
+	// 	n, _ := c.downstream.Read(b)
+	// 	h.Encode(uint32(n), 1)
+	// 	sent := 0
+	// 	for sent < HeaderSize {
+	// 		n, _ := c.upstream.Write(h)
+	// 		sent += n
+	// 	}
+	// 	if n > 0 {
+	// 		io.Copy(c.upstream, bytes.NewBuffer(b[:n]))
+	// 	}
+	// }
 }
 
 func (c *Client) send() {
