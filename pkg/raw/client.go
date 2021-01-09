@@ -83,6 +83,7 @@ func (c *Client) send() {
 		io.ReadFull(c.upstream, h)
 		if c.downstreams[int32(h.ID())] == nil {
 			d := NewDownstream(":25565", c.sendCh)
+
 			c.downstreams[int32(h.ID())] = d
 		}
 
@@ -92,6 +93,7 @@ func (c *Client) send() {
 			log.Printf("from upstream, expecting %d, got %d", h.Next(), n)
 			if n > 0 {
 				d := c.downstreams[int32(h.ID())]
+				log.Println(d == nil)
 				if d == nil {
 					continue
 				}
