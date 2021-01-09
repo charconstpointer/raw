@@ -12,10 +12,11 @@ type Downstream struct {
 	ID       uint32
 }
 
-func NewDownstream(downaddr string, sendCh chan Message) *Downstream {
+func NewDownstream(downaddr string, sendCh chan Message, id uint32) *Downstream {
 	d := Downstream{
 		downaddr: downaddr,
 		sendCh:   sendCh,
+		ID:       id,
 	}
 	return &d
 }
@@ -30,14 +31,14 @@ func (d *Downstream) openConn() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	d.ID = getID(conn.RemoteAddr().String())
+
 	d.conn = conn
 }
 
 func (d *Downstream) recv() {
-	h := Header(make([]byte, HeaderSize))
-	b := make([]byte, 1096)
 	for {
+		h := Header(make([]byte, HeaderSize))
+		b := make([]byte, 1096)
 		n, _ := d.conn.Read(b)
 		if n > 0 {
 			h.Encode(uint32(n), d.ID)

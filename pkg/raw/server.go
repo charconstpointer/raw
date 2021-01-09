@@ -39,14 +39,16 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 		sendCh:     make(chan Message),
 	}
 	go func(s net.Listener, server *Server) {
-		conn, _ := s.Accept()
-		upstream, err := NewStream(conn, server.sendCh)
-		if err != nil {
-			log.Error(err.Error())
-		}
+		for {
+			conn, _ := s.Accept()
+			upstream, err := NewStream(conn, server.sendCh)
+			if err != nil {
+				log.Error(err.Error())
+			}
 
-		server.upstreams[upstream.ID] = upstream
-		log.Infof("🙋‍♀️%s connected", conn.RemoteAddr().String())
+			server.upstreams[upstream.ID] = upstream
+			log.Infof("🙋‍♀️%s connected", upstream.ID)
+		}
 
 	}(s, server)
 
@@ -55,20 +57,17 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 
 func (s *Server) Run() {
 	go s.recv()
-	// go s.listenUp()
 	s.send()
 }
 
 func (s *Server) recv() {
-	h := Header(make([]byte, HeaderSize))
 	for {
+		h := Header(make([]byte, HeaderSize))
 		io.ReadFull(s.downstream, h)
 		mb := make([]byte, int(h.Next()))
 		n, _ := io.ReadFull(s.downstream, mb)
 		upstream := s.upstreams[h.ID()]
 		if n > 0 {
-
-			// io.Copy(s.upstream, bytes.NewBuffer(mb))
 			io.Copy(upstream.conn, bytes.NewBuffer(mb))
 		}
 	}
@@ -86,24 +85,7 @@ func (s *Server) send() {
 				n, _ := s.downstream.Write(msg.Header)
 				sent += n
 			}
-			// if n > 0 {
-			n, _ := io.Copy(s.downstream, bytes.NewBuffer(msg.Payload))
-			log.Println(msg.Header.Next(), n)
-			// }
+			_, _ = io.Copy(s.downstream, bytes.NewBuffer(msg.Payload))
 		}
 	}
-	// b := make([]byte, 1096)
-	// h := Header(make([]byte, HeaderSize))
-	// for {
-	// 	n, _ := s.upstream.Read(b)
-	// 	h.Encode(uint32(n), 1)
-	// 	sent := 0
-	// 	for sent < HeaderSize {
-	// 		n, _ := s.downstream.Write(h)
-	// 		sent += n
-	// 	}
-	// 	if n > 0 {
-	// 		io.Copy(s.downstream, bytes.NewBuffer(b[:n]))
-	// 	}
-	// }
 }
