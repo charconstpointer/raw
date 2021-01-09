@@ -82,7 +82,7 @@ func (c *Client) send() {
 	for {
 		io.ReadFull(c.upstream, h)
 		if c.downstreams[int32(h.ID())] == nil {
-			d := NewDownstream(":25565")
+			d := NewDownstream(":25565", c.sendCh)
 			c.downstreams[int32(h.ID())] = d
 		}
 
