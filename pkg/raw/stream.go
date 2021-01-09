@@ -33,17 +33,21 @@ func getID(addr string) uint32 {
 		log.Fatal(err.Error())
 	}
 	log.Println(parsed)
-	// return uint32(parsed)
-	return 1
+	return uint32(parsed)
 }
 
 func (s *Stream) recv() {
 	b := make([]byte, 1096)
 	for {
 		n, _ := s.conn.Read(b)
+		if n == 0 {
+			//upstream DC, propagate down
+			s.conn.Close()
+			break
+		}
 		if n > 0 {
 			h := Header(make([]byte, HeaderSize))
-			h.Encode(uint32(n), 1)
+			h.Encode(uint32(n), s.ID)
 			payload := make([]byte, n)
 			copy(payload, b[:n])
 			msg := Message{

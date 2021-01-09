@@ -12,17 +12,19 @@ import (
 )
 
 type Client struct {
-	downstream net.Conn
-	upstream   net.Conn
-	ID         uint32
+	downstreams map[int32]*Downstream
+	downstream  net.Conn
+	upstream    net.Conn
+	sendCh      chan Message
+	ID          uint32
 }
 
 func NewClient(upaddr string, downaddr string) (*Client, error) {
-	downstream, err := net.Dial("tcp", downaddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not connect to downstream")
-	}
-	log.Infof("🎠connected to downstream at %s", downaddr)
+	// downstream, err := net.Dial("tcp", downaddr)
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "could not connect to downstream")
+	// }
+	// log.Infof("🎠connected to downstream at %s", downaddr)
 
 	upstream, err := net.Dial("tcp", upaddr)
 	if err != nil {
@@ -31,9 +33,11 @@ func NewClient(upaddr string, downaddr string) (*Client, error) {
 	log.Infof("🧵connected to upstream at %s", upaddr)
 	id := uint32(4444)
 	c := &Client{
-		downstream: downstream,
-		upstream:   upstream,
-		ID:         id,
+		downstreams: make(map[int32]*Downstream),
+		// downstream:  downstream,
+		upstream: upstream,
+		sendCh:   make(chan Message),
+		ID:       id,
 	}
 
 	return c, nil
@@ -44,32 +48,41 @@ func (c *Client) Run() {
 }
 
 func (c *Client) recv() {
-	h := Header(make([]byte, HeaderSize))
-	b := make([]byte, 1096)
 	for {
-		n, _ := c.downstream.Read(b)
-		h.Encode(uint32(n), 1)
-		sent := 0
-		for sent < HeaderSize {
-			n, _ := c.upstream.Write(h)
-			sent += n
-		}
-		if n > 0 {
-			io.Copy(c.upstream, bytes.NewBuffer(b[:n]))
+		select {
+		case msg := <-c.sendCh:
+			sent := 0
+			for sent < HeaderSize {
+				n, _ := c.upstream.Write(msg.Header)
+				sent += n
+			}
+
+			io.Copy(c.upstream, bytes.NewBuffer(msg.Payload))
+
 		}
 	}
 }
 
 func (c *Client) send() {
-	h := Header(make([]byte, HeaderSize))
 	for {
+		h := Header(make([]byte, HeaderSize))
 		io.ReadFull(c.upstream, h)
+		if c.downstreams[int32(h.ID())] == nil {
+			d := NewDownstream(":25565", c.sendCh, h.ID())
+			d.Run()
+			c.downstreams[int32(h.ID())] = d
+		}
+
 		if h != nil {
 			mb := make([]byte, int(h.Next()))
 			n, _ := io.ReadFull(c.upstream, mb)
-			log.Printf("from upstream, expecting %d, got %d", h.Next(), n)
+			// log.Printf("from upstream, expecting %d, got %d", h.Next(), n)
 			if n > 0 {
-				io.Copy(c.downstream, bytes.NewBuffer(mb))
+				d := c.downstreams[int32(h.ID())]
+				if d == nil {
+					continue
+				}
+				io.Copy(d.conn, bytes.NewBuffer(mb))
 			}
 		}
 
