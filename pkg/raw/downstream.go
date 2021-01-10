@@ -1,13 +1,14 @@
 package raw
 
 import (
+	"io"
 	"log"
 	"net"
 )
 
 type Downstream struct {
 	downaddr string
-	conn     net.Conn
+	conn     io.ReadWriteCloser
 	sendCh   chan Message
 	ID       uint32
 }
