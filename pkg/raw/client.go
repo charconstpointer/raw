@@ -15,9 +15,11 @@ type Client struct {
 	downstreams map[int32]*Downstream
 	downstream  net.Conn
 	upstream    net.Conn
-	sendCh      chan Message
 
-	ID uint32
+	downaddr string
+	upaddr   string
+
+	sendCh chan Message
 }
 
 func NewClient(upaddr string, downaddr string) (*Client, error) {
@@ -26,13 +28,14 @@ func NewClient(upaddr string, downaddr string) (*Client, error) {
 		return nil, errors.Wrap(err, "could not connect to upstream")
 	}
 	log.Infof("🧵connected to upstream at %s", upaddr)
-	id := uint32(4444)
 	c := &Client{
 		downstreams: make(map[int32]*Downstream),
-		upstream:    upstream,
 		sendCh:      make(chan Message),
 
-		ID: id,
+		upstream: upstream,
+
+		upaddr:   upaddr,
+		downaddr: downaddr,
 	}
 
 	return c, nil
@@ -63,13 +66,13 @@ func (c *Client) send() {
 		io.ReadFull(c.upstream, h)
 		if h.MessageType() == TERM {
 			d := c.downstreams[int32(h.ID())]
-			log.Printf("terminating donwstream connection on port %s", d.conn.RemoteAddr())
+			log.Printf("❌terminating downstream connection on port %s", d.conn.LocalAddr().String())
 			d.stopCh <- struct{}{}
 			continue
 		}
 		if c.downstreams[int32(h.ID())] == nil {
 			log.Println("new downstream conn")
-			d := NewDownstream(":25565", c.sendCh, h.ID())
+			d := NewDownstream(c.downaddr, c.sendCh, h.ID())
 			d.Run()
 			c.downstreams[int32(h.ID())] = d
 		}
@@ -77,7 +80,6 @@ func (c *Client) send() {
 		if h != nil {
 			mb := make([]byte, int(h.Next()))
 			n, _ := io.ReadFull(c.upstream, mb)
-			// log.Printf("from upstream, expecting %d, got %d", h.Next(), n)
 			if n > 0 {
 				d := c.downstreams[int32(h.ID())]
 				if d == nil {
