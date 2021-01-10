@@ -60,6 +60,11 @@ func (c *Client) send() {
 	for {
 		h := Header(make([]byte, HeaderSize))
 		io.ReadFull(c.upstream, h)
+		if h.MessageType() == TERM {
+			d := c.downstreams[int32(h.ID())]
+			d.conn.Close()
+			continue
+		}
 		if c.downstreams[int32(h.ID())] == nil {
 			d := NewDownstream(":25565", c.sendCh, h.ID())
 			d.Run()
