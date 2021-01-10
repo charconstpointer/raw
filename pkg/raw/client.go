@@ -20,12 +20,6 @@ type Client struct {
 }
 
 func NewClient(upaddr string, downaddr string) (*Client, error) {
-	// downstream, err := net.Dial("tcp", downaddr)
-	// if err != nil {
-	// 	return nil, errors.Wrap(err, "could not connect to downstream")
-	// }
-	// log.Infof("🎠connected to downstream at %s", downaddr)
-
 	upstream, err := net.Dial("tcp", upaddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not connect to upstream")
@@ -34,10 +28,9 @@ func NewClient(upaddr string, downaddr string) (*Client, error) {
 	id := uint32(4444)
 	c := &Client{
 		downstreams: make(map[int32]*Downstream),
-		// downstream:  downstream,
-		upstream: upstream,
-		sendCh:   make(chan Message),
-		ID:       id,
+		upstream:    upstream,
+		sendCh:      make(chan Message),
+		ID:          id,
 	}
 
 	return c, nil
