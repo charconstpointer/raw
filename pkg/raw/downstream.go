@@ -41,7 +41,7 @@ func (d *Downstream) recv() {
 		b := make([]byte, 1096)
 		n, _ := d.conn.Read(b)
 		if n > 0 {
-			h.Encode(uint32(n), d.ID)
+			h.Encode(TICK, uint32(n), d.ID)
 			msg := Message{
 				Header:  h,
 				Payload: b[:n],

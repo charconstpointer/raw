@@ -47,7 +47,7 @@ func NewServer(upaddr string, downaddr string) (*Server, error) {
 			}
 
 			server.upstreams[upstream.ID] = upstream
-			log.Infof("🙋‍♀️%s connected", upstream.ID)
+			log.Infof("🙋‍♀️%d connected", upstream.ID)
 		}
 
 	}(s, server)

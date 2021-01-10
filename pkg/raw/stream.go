@@ -47,7 +47,7 @@ func (s *Stream) recv() {
 		}
 		if n > 0 {
 			h := Header(make([]byte, HeaderSize))
-			h.Encode(uint32(n), s.ID)
+			h.Encode(TICK, uint32(n), s.ID)
 			payload := make([]byte, n)
 			copy(payload, b[:n])
 			msg := Message{
