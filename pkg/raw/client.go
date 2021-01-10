@@ -62,6 +62,7 @@ func (c *Client) send() {
 		io.ReadFull(c.upstream, h)
 		if h.MessageType() == TERM {
 			d := c.downstreams[int32(h.ID())]
+			log.Printf("terminating donwstream connection on port %s", d.conn.RemoteAddr())
 			d.conn.Close()
 			continue
 		}
