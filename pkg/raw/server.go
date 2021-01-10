@@ -77,13 +77,14 @@ func (s *Server) send() {
 	for {
 		select {
 		case msg := <-s.sendCh:
-			if msg.Header.Next() == 0 {
-				continue
-			}
+
 			sent := 0
 			for sent < HeaderSize {
 				n, _ := s.downstream.Write(msg.Header)
 				sent += n
+			}
+			if msg.Header.MessageType() == TERM {
+				continue
 			}
 			_, _ = io.Copy(s.downstream, bytes.NewBuffer(msg.Payload))
 		}

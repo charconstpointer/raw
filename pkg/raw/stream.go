@@ -44,13 +44,13 @@ func (s *Stream) recv() {
 			//upstream DC, propagate down
 			h := Header(make([]byte, HeaderSize))
 			h.Encode(TERM, 0, s.ID)
-
 			msg := Message{
 				Header:  h,
 				Payload: nil,
 			}
 
 			s.sendCh <- msg
+			log.Println("closing")
 			s.conn.Close()
 			break
 		}
