@@ -42,12 +42,21 @@ func (s *Stream) recv() {
 		n, _ := s.conn.Read(b)
 		if n == 0 {
 			//upstream DC, propagate down
+			h := Header(make([]byte, HeaderSize))
+			h.Encode(TERM, 0, s.ID)
+			msg := Message{
+				Header:  h,
+				Payload: nil,
+			}
+
+			s.sendCh <- msg
+			log.Println("closing")
 			s.conn.Close()
 			break
 		}
 		if n > 0 {
 			h := Header(make([]byte, HeaderSize))
-			h.Encode(uint32(n), s.ID)
+			h.Encode(TICK, uint32(n), s.ID)
 			payload := make([]byte, n)
 			copy(payload, b[:n])
 			msg := Message{
