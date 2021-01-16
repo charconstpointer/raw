@@ -32,15 +32,16 @@ func getID(addr string) uint32 {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Println(parsed)
+
 	return uint32(parsed)
 }
 
 func (s *Stream) recv() {
 	b := make([]byte, 1096)
 	for {
-		n, _ := s.conn.Read(b)
-		if n == 0 {
+		n, err := s.conn.Read(b)
+
+		if n == 0 || err != nil {
 			//upstream DC, propagate down
 			h := Header(make([]byte, HeaderSize))
 			h.Encode(TERM, 0, s.ID)
@@ -50,10 +51,11 @@ func (s *Stream) recv() {
 			}
 
 			s.sendCh <- msg
-			log.Println("closing")
 			s.conn.Close()
+
 			break
 		}
+
 		if n > 0 {
 			h := Header(make([]byte, HeaderSize))
 			h.Encode(TICK, uint32(n), s.ID)
