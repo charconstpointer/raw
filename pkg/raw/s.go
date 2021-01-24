@@ -16,27 +16,62 @@ type Pipe struct {
 	raw       net.Conn
 	unwrapped chan Message
 	wrapped   chan Message
-	mc        bool
+	init      bool
 }
 
-func NewPipe(raw net.Conn) (*Pipe, error) {
+func NewPipe(init bool) (*Pipe, error) {
 	return &Pipe{
-		raw:       raw,
 		unwrapped: make(chan Message),
 		wrapped:   make(chan Message),
 		s:         make(map[int]*S),
+		init:      init,
 	}, nil
 }
 
 func (p *Pipe) Run(ctx context.Context) error {
+	if p.init {
+		conn, err := net.Dial("tcp", ":5555")
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+
+		p.raw = conn
+	} else {
+		up, err := net.Listen("tcp", ":5555")
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		log.Println("listening on :5555")
+		conn, err := up.Accept()
+		p.raw = conn
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		log.Println("accepted new conn, starting pipe")
+	}
+
 	g, _ := errgroup.WithContext(ctx)
+	if !p.init {
+		g.Go(p.recvConn)
+	}
 	g.Go(p.recvSend)
 	g.Go(p.startRaw)
 	return g.Wait()
 }
+func (p *Pipe) recvConn() error {
+	s, err := net.Listen("tcp", ":6000")
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	for {
+		log.Println("listening for new conns")
+		client, err := s.Accept()
+		err = p.AddS(client)
+		return err
+	}
+}
 
 func (p *Pipe) AddS(raw net.Conn) error {
-	log.Println("creating new s")
 	s, err := NewS(raw, p.unwrapped, p.wrapped)
 	id := 1
 	p.s[id] = s
@@ -48,14 +83,12 @@ func (p *Pipe) recvSend() error {
 	for {
 		select {
 		case msg := <-p.wrapped:
-			log.Println("received new wrapped msg", msg.Header.ID())
 			recv, e := p.s[int(msg.Header.ID())]
 			if !e {
 				return fmt.Errorf("cannot find s receiver for id %d", msg.Header.ID())
 			}
 			recv.sendCh <- msg
 		case msg := <-p.unwrapped:
-			log.Println("received new unwrapped msg", msg.Header.ID())
 			sent := 0
 			for sent < HeaderSize {
 				n, _ := p.raw.Write(msg.Header)
@@ -81,13 +114,11 @@ func (p *Pipe) startRaw() error {
 	for {
 		h := Header(make([]byte, HeaderSize))
 		n, _ := io.ReadFull(p.raw, h)
-		log.Println("read", n)
 		mb := make([]byte, int(h.Next()))
 		n, _ = io.ReadFull(p.raw, mb)
 		s, e := p.s[int(h.ID())]
-		log.Println("ID", h.ID())
 		if !e {
-			log.Println("not e")
+			log.Println("creating new s")
 			mc, err := net.Dial("tcp", ":25565")
 			if err != nil {
 				log.Fatal(err.Error())
