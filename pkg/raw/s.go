@@ -13,7 +13,7 @@ import (
 
 type Pipe struct {
 	s         map[int]*S
-	raw       net.Conn
+	pipe      net.Conn
 	unwrapped chan Message
 	wrapped   chan Message
 	init      bool
@@ -30,34 +30,47 @@ func NewPipe(init bool) (*Pipe, error) {
 
 func (p *Pipe) Run(ctx context.Context) error {
 	if p.init {
-		conn, err := net.Dial("tcp", ":5555")
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-
-		p.raw = conn
+		p.dialPipe(":5555")
 	} else {
-		up, err := net.Listen("tcp", ":5555")
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		log.Println("listening on :5555")
-		conn, err := up.Accept()
-		p.raw = conn
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		log.Println("accepted new conn, starting pipe")
+		p.recvPipe(":5555")
 	}
 
 	g, _ := errgroup.WithContext(ctx)
+	//if pipe should handle external connections
 	if !p.init {
 		g.Go(p.recvConn)
 	}
 	g.Go(p.recvSend)
-	g.Go(p.startRaw)
+	g.Go(p.startpipe)
 	return g.Wait()
 }
+func (p *Pipe) dialPipe(addr string) error {
+	log.Printf("connecting to a pipe at %s\n", addr)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	p.pipe = conn
+	return err
+}
+
+func (p *Pipe) recvPipe(addr string) error {
+	log.Printf("waiting for pipes to connect on %s\n", addr)
+	up, err := net.Listen("tcp", ":5555")
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	conn, err := up.Accept()
+	p.pipe = conn
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	log.Printf("successfully received new pipe connection at %s", addr)
+	return err
+}
+
 func (p *Pipe) recvConn() error {
 	s, err := net.Listen("tcp", ":6000")
 	if err != nil {
@@ -71,8 +84,8 @@ func (p *Pipe) recvConn() error {
 	}
 }
 
-func (p *Pipe) AddS(raw net.Conn) error {
-	s, err := NewS(raw, p.unwrapped, p.wrapped)
+func (p *Pipe) AddS(pipe net.Conn) error {
+	s, err := NewS(pipe, p.unwrapped, p.wrapped)
 	id := 1
 	p.s[id] = s
 	go s.Run(context.Background())
@@ -91,13 +104,13 @@ func (p *Pipe) recvSend() error {
 		case msg := <-p.unwrapped:
 			sent := 0
 			for sent < HeaderSize {
-				n, _ := p.raw.Write(msg.Header)
+				n, _ := p.pipe.Write(msg.Header)
 				sent += n
 			}
 			if msg.Header.MessageType() == TERM {
 				continue
 			}
-			n, err := io.Copy(p.raw, bytes.NewBuffer(msg.Payload))
+			n, err := io.Copy(p.pipe, bytes.NewBuffer(msg.Payload))
 			if err != nil {
 				log.Fatal(err.Error())
 			}
@@ -107,15 +120,14 @@ func (p *Pipe) recvSend() error {
 			}
 		}
 	}
-	return nil
 }
 
-func (p *Pipe) startRaw() error {
+func (p *Pipe) startpipe() error {
 	for {
 		h := Header(make([]byte, HeaderSize))
-		n, _ := io.ReadFull(p.raw, h)
+		n, _ := io.ReadFull(p.pipe, h)
 		mb := make([]byte, int(h.Next()))
-		n, _ = io.ReadFull(p.raw, mb)
+		n, _ = io.ReadFull(p.pipe, mb)
 		s, e := p.s[int(h.ID())]
 		if !e {
 			log.Println("creating new s")
@@ -135,20 +147,19 @@ func (p *Pipe) startRaw() error {
 		}
 		s.sendCh <- msg
 	}
-	return nil
 }
 
 type S struct {
 	ID        int
-	raw       net.Conn
+	pipe      net.Conn
 	sendCh    chan Message
 	unwrapped chan Message
 	wrapped   chan Message
 }
 
-func NewS(raw net.Conn, unwrapped chan Message, wrapped chan Message) (*S, error) {
+func NewS(pipe net.Conn, unwrapped chan Message, wrapped chan Message) (*S, error) {
 	return &S{
-		raw:       raw,
+		pipe:      pipe,
 		unwrapped: unwrapped,
 		wrapped:   wrapped,
 		sendCh:    make(chan Message),
@@ -167,7 +178,7 @@ func (s *S) recv() error {
 	for {
 		h := Header(make([]byte, HeaderSize))
 		b := make([]byte, 1096)
-		n, _ := s.raw.Read(b)
+		n, _ := s.pipe.Read(b)
 		log.Println("recv", n)
 		if n > 0 {
 			h.Encode(TICK, uint32(n), uint32(s.ID))
@@ -179,7 +190,6 @@ func (s *S) recv() error {
 
 		}
 	}
-	return nil
 }
 
 func (s *S) send() error {
@@ -188,7 +198,7 @@ func (s *S) send() error {
 		case msg := <-s.sendCh:
 			log.Println("new msg to send")
 			if msg.Header.MessageType() == TICK {
-				n, err := io.Copy(s.raw, bytes.NewBuffer(msg.Payload))
+				n, err := io.Copy(s.pipe, bytes.NewBuffer(msg.Payload))
 				if err != nil {
 					log.Fatal(err.Error())
 				}
@@ -199,5 +209,4 @@ func (s *S) send() error {
 			}
 		}
 	}
-	return nil
 }
