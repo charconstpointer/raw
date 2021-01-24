@@ -77,7 +77,6 @@ func (s *Server) send() {
 	for {
 		select {
 		case msg := <-s.sendCh:
-
 			sent := 0
 			for sent < HeaderSize {
 				n, _ := s.downstream.Write(msg.Header)
